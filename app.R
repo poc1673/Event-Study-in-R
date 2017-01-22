@@ -17,17 +17,27 @@ pct_calc <- function(X ) { X/lag(X)-1}
 Gen_CP_Returns <-function(ticker){
   getSymbols(ticker)
   Company_Data <-as.data.frame( eval(parse(text=ticker)))
-  names(Company_Data) <- c("Open","High","Low","Close","Volume","Adjusted")
-  Company_Data <- Company_Data %>%  mutate(Return = pct_calc(Adjusted))
+  Company_Data <- data.frame(row.names(Company_Data),Company_Data)
+  names(Company_Data) <- c("Date","Open","High","Low","Close","Volume","Adjusted")
+  Company_Data <- Company_Data %>%  mutate(Return = pct_calc(Adjusted)) %>% 
+                                    mutate(Date = ymd(Date))
   return(Company_Data)}
+
+
+
+
+
+
+
+
+
 
 # Define UI for application that draws a histogram
 ui <- shinyUI(fluidPage(
            # Application title
          titlePanel("Market Model Dashboard"),
          fluidRow(
-           column(2,
-                  dateInput("Date1",
+           column(2,dateInput("Date1",
                               "Train Period Start",value = min(raw_data$Date),
                                 raw_data$Date )),
            column(2,
@@ -40,6 +50,7 @@ ui <- shinyUI(fluidPage(
            
            column(2,textInput("IND","Industry Index",value ="BP"))
          ),
+         
         fluidRow(
            displayrange <- 
            column(2,
@@ -84,6 +95,8 @@ server <- shinyServer(function(input, output) {
 
   Date1 <-reactive( {input$Date1} )
   Date2 <- reactive({input$Date2})
+  Date3 <-reactive( {input$Date3} )
+  Date4 <- reactive({input$Date4})
   
   
   str_eval <- function(val){ eval(parse(text=val))}
@@ -96,48 +109,78 @@ server <- shinyServer(function(input, output) {
     return(stock_data)
   }
   
- Set_Model<- reactive({
-  getSymbols(Company)
-  hold <- eval(parse(text=Company))
-  Company <- Gen_CP_Returns(input$Company)
- Market <- Gen_CP_Returns(input$MKT)
- Industry <- Gen_CP_Returns(input$IND)
-  
-  company_index <- match( input$Company,names(raw_data)   )
-                       
-                     industry_index <-match( input$IND,names(raw_data)   )
-                     market_index <-match( input$MKT,names(raw_data)   )
-                     train_data <-raw_data %>%  filter(Date >= Date1()& Date <= Date2()  )
-                        hold<-as.data.frame(train_data)
-                        test <- hold$Date
-                        train_data[,industry_index] <-  train_data[,industry_index] -train_data[,market_index]
-                        train_model <- lm( data = hold ,  train_data[,company_index]~train_data[,market_index]+  train_data[,industry_index]       )
-                        names(train_model$coefficients) <- c("Intercept",input$MKT ,input$IND )
-                        return(train_model)
-  })
+ Set_Model<- reactive({  getSymbols(Company)
+   # Download the companies from Yahoo Finance.
+   
+   
+   Company_Data <-  Gen_CP_Returns(input$Company) 
+   Market_data <- Gen_CP_Returns(input$MKT) 
+   Industry_data <- Gen_CP_Returns(input$IND) 
+   
+   Returns_Data <- merge(x=Company_Data[c(1,8)],y=Market_data[c(1,8)],by= "Date" ,all = TRUE)
+   Returns_Data <- merge(x=Returns_Data,y=Industry_data[c(1,8)],by= "Date" ,all = TRUE )
+   
+   names(Returns_Data)<-c("Date",Company,input$IND,input$MKT)
+   Returns_Data[,4] <- Returns_Data[,4]-Returns_Data[,3]
+   
+   Training_Data <- Returns_Data  %>% filter(Date >= Date1()& Date <= Date2() )
+   Train_Model <- lm( data = Training_Data ,  Training_Data[,2]~Training_Data[,3]+  Training_Data[,4]       )
+   names(Train_Model$coefficients) <- c("Intercept",input$MKT ,input$IND )
+   
+    # 
+    # 
+    # 
+    #                      hold <- eval(parse(text=Company))
+    #                      Company <- Gen_CP_Returns(input$Company)
+    #                      Market <- Gen_CP_Returns(input$MKT)
+    #                      Industry <- Gen_CP_Returns(input$IND)
+    #                     
+    # #  Create a training dataset that the regression model will be run on.
+    #                      
+    #                     company_index <- match( input$Company,names(raw_data)  )
+    #                     industry_index <-match( input$IND,names(raw_data) )
+    #                     market_index <-match( input$MKT,names(raw_data)  )
+    #                     
+    #                     # train_data <-
+    #                     
+    #                     train_data <-raw_data %>%  filter(Date >= Date1()& Date <= Date2()  )
+    #                     hold<-as.data.frame(train_data)
+    #                     test <- hold$Date
+    #                     train_data[,industry_index] <-  train_data[,industry_index] -train_data[,market_index]
+    #                     
+    #                     train_model <- lm( data = hold ,  train_data[,company_index]~train_data[,market_index]+  train_data[,industry_index]       )
+    #                     names(train_model$coefficients) <- c("Intercept",input$MKT ,input$IND )
+                        return(Train_Model)  })
 
  Event_study <-  reactive({
-                          train_model <- isolate(Set_Model())
-
-                          SE<-summary(train_model)$sigma
-                           test_data <- raw_data %>%  filter(Date >= Date2() )  %>% select_(input$Company,input$MKT,input$IND )
+                           Train_Model <- isolate(Set_Model())
+                          #  SE<-summary(Train_Model)$sigma
+                          #  test_data <- raw_data %>%  filter(Date >= Date2() )  %>% select_(input$Company,input$MKT,input$IND )
+                          #  test_data <- cbind(raw_data$Date[raw_data$Date >= Date2()],test_data)
+                          #  
+                          #  factor_indexes <- c(    match(input$MKT, names(test_data)),
+                          #                          match(input$IND, names(test_data))     )
+                          #  
+                          #  
+                          #  Predicted_Values <- Train_Model$coefficients[1] + Train_Model$coefficients[2]*test_data[, factor_indexes[1]] + Train_Model$coefficients[3]*test_data[,factor_indexes[2]]
+                          # test_data<- cbind(test_data,Predicted_Values )
+                          # test_data$Excess_Returns <- test_data[,2] - test_data[,5]
+                          # 
+                          # test_data$T <- test_data$Excess_Returns/SE
+                          # 
+                          # names(test_data)[1] <- "Date"
+                          #  test_data <- test_data %>% rename(          "Predicted Returns" = Predicted_Values, "Excess Returns" = Excess_Returns, "T Stat" = T) %>% 
+                          #                             filter(Date>=input$Date3 &  Date <= input$Date4)
                            
-                           test_data <- cbind(raw_data$Date[raw_data$Date >= Date2()],test_data)
                            
-                           factor_indexes <- c(    match(input$MKT, names(test_data)),
-                                                   match(input$IND, names(test_data))     )
+                           Test_Data <-  Returns_Data  %>% filter(Date >= Date3() & Date <= Date4()  )
+                           SE<-summary(Train_Model)$sigma
+                           Test_Data$`Predicted Returns` <- Train_Model$coefficients[1] + Train_Model$coefficients[2]*Test_Data[, 2] + Train_Model$coefficients[3]*Test_Data[,3]
+                           Test_Data$`Excess Returns` <- Test_Data[,2] - Test_Data[,5]
+                           Test_Data$`T-Stat` <- Test_Data$`Excess Returns`/SE
                            
                            
-                           Predicted_Values <- train_model$coefficients[1] + train_model$coefficients[2]*test_data[, factor_indexes[1]] + train_model$coefficients[3]*test_data[,factor_indexes[2]]
-                          test_data<- cbind(test_data,Predicted_Values )
-                          test_data$Excess_Returns <- test_data[,2] - test_data[,5]
-                          
-                          test_data$T <- test_data$Excess_Returns/SE
-
-                          names(test_data)[1] <- "Date"
-                           test_data <- test_data %>% rename(          "Predicted Returns" = Predicted_Values, "Excess Returns" = Excess_Returns, "T Stat" = T) %>% 
-                                                      filter(Date>=input$Date3 &  Date <= input$Date4)
-                           return(test_data)
+                           return(Test_Data)
                            
  })
 
@@ -182,7 +225,7 @@ server <- shinyServer(function(input, output) {
                                                                 labels=c("Predicted Value", "Actual Value"))
     })
       
-      output$table <- renderDataTable( Event_study() %>% filter(`T Stat`>=input$Tmin & `T Stat`<=input$Tmax) , options = list(
+      output$table <- renderDataTable( Event_study() %>% filter(`T-Stat`>=input$Tmin & `T-Stat`<=input$Tmax) , options = list(
         lengthMenu = list(c(5, 15, -1), c('5', '15', 'All')),
         pageLength = 10  ))
       
